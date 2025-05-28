@@ -7,7 +7,8 @@ import re
 
 @st.cache_resource(show_spinner="Loading LLM model...")
 def get_llm(model_path):
-    return Llama(model_path=model_path)
+    # Use all layers on GPU if possible; adjust n_gpu_layers as needed for your VRAM
+    return Llama(model_path=model_path, n_gpu_layers=-1)
 
 def load_examples(example_file="examples.txt"):
     if not os.path.exists(example_file):
@@ -225,46 +226,50 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
                 entry["output"] = output
                 entry["error"] = error
     with col2:
-        if st.button(f"Request Correction #{idx+1}", key=f"correction_{idx}_{i}"):
-            # Use output/error from this entry if available, else fallback to last_output/last_error
-            output = entry.get("output", st.session_state.get("last_output", ""))
-            error = entry.get("error", st.session_state.get("last_error", ""))
-            context = build_command_context(st.session_state.command_history, idx)
-            correction_prompt = (
-                f"{context}\n"
-                f"PowerShell output: {output}\n"
-                f"PowerShell error: {error}\n"
-                "Please generate a corrected command.\n"
-                "IMPORTANT: Always output your answer in two parts.\n"
-                "First, output Note: (with any important warnings, context, or usage tips). If there is nothing important to note, output 'Note: None'.\n"
-                "Second, output Command: (the PowerShell code).\n"
-                "Only output the Note and the Command, nothing else.\n"
-                "Note:\nCommand:"
-            )
-            correction_output = llm(correction_prompt, max_tokens=256, temperature=0.2)
-            correction_raw = correction_output["choices"][0]["text"].strip()
-            note_match = re.search(r"Note:(.*?)(?:Command:|$)", correction_raw, re.DOTALL | re.IGNORECASE)
-            command_match = re.search(r"Command:(.*?)(?:Note:|$)", correction_raw, re.DOTALL | re.IGNORECASE)
-            note = note_match.group(1).strip() if note_match else ""
-            command = command_match.group(1).strip() if command_match else correction_raw.strip()
-            command = re.sub(r"^```[a-zA-Z]*\n?|```$", "", command, flags=re.MULTILINE).strip()
-            st.info(f"Correction Note: {note}")
-            st.code(command, language="powershell")
-            st.session_state.command_history.append({
-                "request": f"[Correction] {entry['request']}",
-                "command": command,
-                "note": note
-            })
-        if st.button(f"Run Corrected Command #{idx+1}", key=f"run_correction_{idx}_{i}"):
-            run_powershell_command(entry["command"])
-        if st.button(f"Run and Capture Correction #{idx+1}", key=f"run_capture_correction_{idx}_{i}"):
-            output, error = run_powershell_command_capture(entry["command"])
-            st.markdown("**PowerShell Output (Correction):**")
-            st.code(output or "(no output)", language="text")
-            if error:
-                st.markdown("**PowerShell Error (Correction):**")
-                st.code(error, language="text")
-            # Optionally, you could store this in a new correction entry if desired
+        # Only show "Request Correction" for non-correction entries
+        if not entry['request'].startswith("[Correction]"):
+            if st.button(f"Request Correction #{idx+1}", key=f"correction_{idx}_{i}"):
+                # Use output/error from this entry if available, else fallback to last_output/last_error
+                output = entry.get("output", st.session_state.get("last_output", ""))
+                error = entry.get("error", st.session_state.get("last_error", ""))
+                context = build_command_context(st.session_state.command_history, idx)
+                correction_prompt = (
+                    f"{context}\n"
+                    f"PowerShell output: {output}\n"
+                    f"PowerShell error: {error}\n"
+                    "Please generate a corrected command.\n"
+                    "IMPORTANT: Always output your answer in two parts.\n"
+                    "First, output Note: (with any important warnings, context, or usage tips). If there is nothing important to note, output 'Note: None'.\n"
+                    "Second, output Command: (the PowerShell code).\n"
+                    "Only output the Note and the Command, nothing else.\n"
+                    "Note:\nCommand:"
+                )
+                correction_output = llm(correction_prompt, max_tokens=256, temperature=0.2)
+                correction_raw = correction_output["choices"][0]["text"].strip()
+                note_match = re.search(r"Note:(.*?)(?:Command:|$)", correction_raw, re.DOTALL | re.IGNORECASE)
+                command_match = re.search(r"Command:(.*?)(?:Note:|$)", correction_raw, re.DOTALL | re.IGNORECASE)
+                note = note_match.group(1).strip() if note_match else ""
+                command = command_match.group(1).strip() if command_match else correction_raw.strip()
+                command = re.sub(r"^```[a-zA-Z]*\n?|```$", "", command, flags=re.MULTILINE).strip()
+                st.info(f"Correction Note: {note}")
+                st.code(command, language="powershell")
+                st.session_state.command_history.append({
+                    "request": f"[Correction] {entry['request']}",
+                    "command": command,
+                    "note": note
+                })
+
+        # Only show "Run Corrected Command" and "Run and Capture Correction" for correction entries
+        if entry['request'].startswith("[Correction]"):
+            if st.button(f"Run Corrected Command #{idx+1}", key=f"run_correction_{idx}_{i}"):
+                run_powershell_command(entry["command"])
+            if st.button(f"Run and Capture Correction #{idx+1}", key=f"run_capture_correction_{idx}_{i}"):
+                output, error = run_powershell_command_capture(entry["command"])
+                st.markdown("**PowerShell Output (Correction):**")
+                st.code(output or "(no output)", language="text")
+                if error:
+                    st.markdown("**PowerShell Error (Correction):**")
+                    st.code(error, language="text")
     with col3:
         # Show all previous Q&A for this command
         qas = [
