@@ -1,0 +1,63 @@
+User request: what cpu do i have?
+Note: None
+Command: Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, MaxClockSpeed
+
+User request: how much ram do i have?
+Note: None
+Command: Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum | % { [Math]::Round($_.Sum / 1GB) }
+
+User request: list all drives
+Note: Lists all logical drives (C:, D:, etc.) on the system.
+Command: Get-PSDrive -PSProvider FileSystem | Select-Object Name, Root, Used, Free
+
+User request: list all running processes
+Note: This command will list all currently running processes on the system.
+Command: Get-Process | Sort-Object ProcessName | Select-Object ProcessName, Id, CPU
+
+User request: what is my ip address?
+Note: This command will show all IPv4 addresses assigned to your computer.
+Command: Get-NetIPAddress | Where-Object { $_.AddressFamily -eq "IPv4" -and $_.IPAddress -notlike "169.*" } | Select-Object IPAddress
+
+User request: what is my computer name?
+Note: None
+Command: $env:COMPUTERNAME
+
+User request: what operating system am i running?
+Note: None
+Command: Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version
+
+User request: put pc to sleep
+Note: This will immediately put your PC to sleep. Save your work first.
+Command: rundll32.exe powrprof.dll,SetSuspendState 0,1,0
+
+# --- Correction Examples ---
+
+User request: list all running processes
+Note: None
+Command: Get-Process
+
+PowerShell output: Get-Process : Access is denied
+PowerShell error: Access is denied
+Please generate a corrected command.
+Note: You may need to run PowerShell as Administrator to list all processes.
+Command: Start-Process powershell -Verb runAs -ArgumentList 'Get-Process'
+
+User request: what cpu do i have?
+Note: None
+Command: Get-WmiObject -Class Win32_Processor | Select-Object Name
+
+PowerShell output: Get-WmiObject : The term 'Get-WmiObject' is not recognized
+PowerShell error: The term 'Get-WmiObject' is not recognized
+Please generate a corrected command.
+Note: Use Get-CimInstance instead of Get-WmiObject on newer systems.
+Command: Get-CimInstance Win32_Processor | Select-Object Name
+
+User request: list all drives
+Note: None
+Command: Get-PSDrive
+
+PowerShell output: Only shows drive letters, not sizes.
+PowerShell error: 
+Please generate a corrected command.
+Note: Use Select-Object to include drive size information.
+Command: Get-PSDrive -PSProvider FileSystem | Select-Object Name, Root, Used, Free

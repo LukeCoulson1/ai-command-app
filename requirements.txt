@@ -1,0 +1,8 @@
+pandas
+selenium
+beautifulsoup4
+llama-cpp
+streamlit
+requests
+langdetect
+```
