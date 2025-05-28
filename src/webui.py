@@ -5,6 +5,10 @@ import os
 import tempfile
 import re
 
+@st.cache_resource(show_spinner="Loading LLM model...")
+def get_llm(model_path):
+    return Llama(model_path=model_path)
+
 def load_examples(example_file="examples.txt"):
     if not os.path.exists(example_file):
         return []
@@ -49,22 +53,25 @@ models = [os.path.join(root, file)
 if not models:
     st.error(f"No models found in {model_dir}")
     st.stop()
+
 model_path = st.selectbox(
     "Choose LLM model",
     models,
     format_func=lambda p: os.path.basename(p)
 )
 
-@st.cache_resource(show_spinner="Loading LLM model...")
-def get_llm(model_path):
-    return Llama(
-        model_path=model_path,
-        n_ctx=2048,
-        n_threads=8,
-        n_gpu_layers=-1
-    )
+llm = None
+if model_path:
+    if "last_model_path" not in st.session_state:
+        st.session_state.last_model_path = model_path
 
-llm = get_llm(model_path)
+    if model_path != st.session_state.last_model_path:
+        get_llm.clear()  # This will clear the cached model
+        import gc
+        gc.collect()
+        st.session_state.last_model_path = model_path
+
+    llm = get_llm(model_path)
 
 # --- LLM prompt ---
 user_task = st.text_area(
@@ -146,7 +153,7 @@ def run_powershell_command(command):
     except Exception as e:
         st.error(f"Error running command: {e}")
 
-if "generated_command" in st.session_state:
+if "generated_command" in st.session_state and st.session_state.generated_command:
     if st.button("Run Command in New PowerShell Window"):
         run_powershell_command(st.session_state.generated_command)
     if st.button("Run and Capture Output"):
@@ -204,19 +211,24 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
     st.code(entry["command"], language="powershell")
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button(f"Run Again #{idx+1}", key=f"run_again_{idx}_{i}"):
-            run_powershell_command(entry["command"])
-        if st.button(f"Run and Capture Output #{idx+1}", key=f"run_capture_{idx}_{i}"):
-            output, error = run_powershell_command_capture(entry["command"])
-            st.markdown("**PowerShell Output:**")
-            st.code(output or "(no output)", language="text")
-            if error:
-                st.markdown("**PowerShell Error:**")
-                st.code(error, language="text")
+        if entry.get("command"):
+            if st.button(f"Run Again #{idx+1}", key=f"run_again_{idx}_{i}"):
+                run_powershell_command(entry["command"])
+            if st.button(f"Run and Capture Output #{idx+1}", key=f"run_capture_{idx}_{i}"):
+                output, error = run_powershell_command_capture(entry["command"])
+                st.markdown("**PowerShell Output:**")
+                st.code(output or "(no output)", language="text")
+                if error:
+                    st.markdown("**PowerShell Error:**")
+                    st.code(error, language="text")
+                # Store output/error in the history entry
+                entry["output"] = output
+                entry["error"] = error
     with col2:
         if st.button(f"Request Correction #{idx+1}", key=f"correction_{idx}_{i}"):
-            output = st.session_state.get("last_output", "")
-            error = st.session_state.get("last_error", "")
+            # Use output/error from this entry if available, else fallback to last_output/last_error
+            output = entry.get("output", st.session_state.get("last_output", ""))
+            error = entry.get("error", st.session_state.get("last_error", ""))
             context = build_command_context(st.session_state.command_history, idx)
             correction_prompt = (
                 f"{context}\n"
@@ -243,15 +255,16 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
                 "command": command,
                 "note": note
             })
-            if st.button(f"Run Corrected Command #{idx+1}", key=f"run_correction_{idx}_{i}"):
-                run_powershell_command(command)
-            if st.button(f"Run and Capture Correction #{idx+1}", key=f"run_capture_correction_{idx}_{i}"):
-                output, error = run_powershell_command_capture(command)
-                st.markdown("**PowerShell Output (Correction):**")
-                st.code(output or "(no output)", language="text")
-                if error:
-                    st.markdown("**PowerShell Error (Correction):**")
-                    st.code(error, language="text")
+        if st.button(f"Run Corrected Command #{idx+1}", key=f"run_correction_{idx}_{i}"):
+            run_powershell_command(entry["command"])
+        if st.button(f"Run and Capture Correction #{idx+1}", key=f"run_capture_correction_{idx}_{i}"):
+            output, error = run_powershell_command_capture(entry["command"])
+            st.markdown("**PowerShell Output (Correction):**")
+            st.code(output or "(no output)", language="text")
+            if error:
+                st.markdown("**PowerShell Error (Correction):**")
+                st.code(error, language="text")
+            # Optionally, you could store this in a new correction entry if desired
     with col3:
         # Show all previous Q&A for this command
         qas = [
@@ -261,6 +274,15 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
         for q_idx, qa in enumerate(qas, 1):
             st.markdown(f"**Q{q_idx}:** {qa['question']}")
             st.markdown(f"**A{q_idx}:** {qa['answer']}")
+
+        # Show all previous Q-Output Q&A for this command
+        qas_output = [
+            h for h in st.session_state.command_history
+            if h.get('request', '').startswith('[Q-Output]') and h.get('command') == entry['command']
+        ]
+        for q_idx, qa in enumerate(qas_output, 1):
+            st.markdown(f"**Q-Output{q_idx}:** {qa['question']}")
+            st.markdown(f"**A-Output{q_idx}:** {qa['answer']}")
 
         # Button to open the Q&A input for this entry
         if st.button(f"Ask About This Command #{idx+1}", key=f"ask_{idx}_{i}"):
@@ -273,7 +295,7 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
                 f"Your question about Command #{idx+1}:",
                 key=f"user_question_{idx}_{i}_{question_count}"
             )
-            if st.button(f"Submit Question #{idx+1}", key=f"submit_question_{idx}_{i}_{question_count}"):
+            if user_question.strip() and st.button(f"Submit Question #{idx+1}", key=f"submit_question_{idx}_{i}_{question_count}"):
                 context = build_command_context(st.session_state.command_history, idx)
                 ask_prompt = (
                     f"{context}\n"
@@ -292,3 +314,44 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
                 })
                 # Keep the Q&A input open for more questions
                 st.session_state[f"show_ask_{idx}_{i}"] = True
+
+        # Only show "Ask About Output" if there is output or error
+        if entry.get("output") or entry.get("error"):
+            if st.button(f"Ask About Output #{idx+1}", key=f"ask_output_{idx}_{i}"):
+                st.session_state[f"show_ask_output_{idx}_{i}"] = True
+
+            # If the Ask About Output input is open
+            if st.session_state.get(f"show_ask_output_{idx}_{i}", False):
+                output = entry.get("output", "")
+                error = entry.get("error", "")
+                st.markdown("**PowerShell Output:**")
+                st.code(output or "(no output)", language="text")
+                if error:
+                    st.markdown("**PowerShell Error:**")
+                    st.code(error, language="text")
+                user_output_question = st.text_input(
+                    f"Your question about the output for Command #{idx+1}:",
+                    key=f"user_output_question_{idx}_{i}"
+                )
+                if user_output_question.strip() and st.button(f"Submit Output Question #{idx+1}", key=f"submit_output_question_{idx}_{i}"):
+                    context = build_command_context(st.session_state.command_history, idx)
+                    ask_output_prompt = (
+                        f"{context}\n"
+                        f"PowerShell output: {output}\n"
+                        f"PowerShell error: {error}\n"
+                        f"Question about the output: {user_output_question}\n"
+                        "Please answer clearly and concisely."
+                    )
+                    ask_output_response = llm(ask_output_prompt, max_tokens=256, temperature=0.2)
+                    answer = ask_output_response["choices"][0]["text"].strip()
+                    st.markdown(f"**LLM Answer:** {answer}")
+                    # Save Q&A about output to history
+                    st.session_state.command_history.append({
+                        "request": f"[Q-Output] {entry['request']}",
+                        "command": entry["command"],
+                        "question": user_output_question,
+                        "answer": answer,
+                        "output": output,
+                        "error": error
+                    })
+                    st.session_state[f"show_ask_output_{idx}_{i}"] = True
