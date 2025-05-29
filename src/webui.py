@@ -308,13 +308,9 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
                 )
                 ask_all_response = llm(ask_all_prompt, max_tokens=256, temperature=0.2)
                 answer = ask_all_response["choices"][0]["text"].strip()
-                st.markdown(f"**LLM Answer:** {answer}")
-                st.session_state.command_history.append({
-                    "request": f"[Q-ALL] {entry['request']}",
-                    "command": entry["command"],
-                    "question": user_all_question,
-                    "answer": answer,
-                    "output": output,
-                    "error": error
-                })
+                st.session_state[f"last_llm_answer_{idx}_{i}"] = answer
                 st.session_state[f"show_ask_all_{idx}_{i}"] = True
+
+            # Show the last answer if available (INSIDE the loop and col3)
+            if st.session_state.get(f"last_llm_answer_{idx}_{i}"):
+                st.markdown(f"**LLM Answer:** {st.session_state[f'last_llm_answer_{idx}_{i}']}")
