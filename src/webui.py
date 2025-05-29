@@ -107,6 +107,15 @@ if st.button("Generate Command") and llm is not None:
     st.session_state.generated_command = command
     st.session_state.generated_note = note
 
+# Allow editing the generated command before running
+if "generated_command" in st.session_state and st.session_state.generated_command:
+    edited_command = st.text_area(
+        "Edit the generated PowerShell command before running:",
+        value=st.session_state.generated_command,
+        key="editable_generated_command"
+    )
+    st.session_state.generated_command = edited_command
+
 # --- Output display helper ---
 def show_output(output, error, label="PowerShell Output"):
     st.markdown(f"**{label}:**")
@@ -260,73 +269,52 @@ for i, entry in enumerate(reversed(st.session_state.command_history)):
                 st.session_state.command_history[idx]["error"] = error
 
     with col3:
-        qas = [
+        # Unified Q&A for command, output, and error
+        qas_all = [
             h for h in st.session_state.command_history
-            if h.get('request', '').startswith('[Q]') and h.get('command') == entry['command']
+            if h.get('request', '').startswith('[Q-ALL]') and h.get('command') == entry['command']
         ]
-        for q_idx, qa in enumerate(qas, 1):
-            st.markdown(f"**Q{q_idx}:** {qa['question']}")
-            st.markdown(f"**A{q_idx}:** {qa['answer']}")
-        qas_output = [
-            h for h in st.session_state.command_history
-            if h.get('request', '').startswith('[Q-Output]') and h.get('command') == entry['command']
-        ]
-        for q_idx, qa in enumerate(qas_output, 1):
-            st.markdown(f"**Q-Output{q_idx}:** {qa['question']}")
-            st.markdown(f"**A-Output{q_idx}:** {qa['answer']}")
-        if st.button(f"Ask About This Command #{idx+1}", key=f"ask_{idx}_{i}"):
-            st.session_state[f"show_ask_{idx}_{i}"] = True
-        if st.session_state.get(f"show_ask_{idx}_{i}", False):
-            question_count = len(qas)
-            user_question = st.text_input(
-                f"Your question about Command #{idx+1}:",
-                key=f"user_question_{idx}_{i}_{question_count}"
-            )
-            if user_question.strip() and st.button(f"Submit Question #{idx+1}", key=f"submit_question_{idx}_{i}_{question_count}"):
-                context = build_command_context(st.session_state.command_history, idx)
-                ask_prompt = (
-                    f"{context}\n"
-                    f"Question: {user_question}\n"
-                    "Please answer clearly and concisely."
-                )
-                ask_output = llm(ask_prompt, max_tokens=256, temperature=0.2)
-                answer = ask_output["choices"][0]["text"].strip()
-                st.markdown(f"**LLM Answer:** {answer}")
-                st.session_state.command_history.append({
-                    "request": f"[Q] {entry['request']}",
-                    "command": entry["command"],
-                    "question": user_question,
-                    "answer": answer
-                })
-                st.session_state[f"show_ask_{idx}_{i}"] = True
-        if st.button(f"Ask About Output #{idx+1}", key=f"ask_output_{idx}_{i}"):
-            st.session_state[f"show_ask_output_{idx}_{i}"] = True
-        if st.session_state.get(f"show_ask_output_{idx}_{i}", False):
+        for q_idx, qa in enumerate(qas_all, 1):
+            st.markdown(f"**Q-ALL{q_idx}:** {qa['question']}")
+            st.markdown(f"**A-ALL{q_idx}:** {qa['answer']}")
+        if st.button(f"Ask About Command/Output/Error #{idx+1}", key=f"ask_all_{idx}_{i}"):
+            st.session_state[f"show_ask_all_{idx}_{i}"] = True
+        if st.session_state.get(f"show_ask_all_{idx}_{i}", False):
             output = entry.get("output", "")
             error = entry.get("error", "")
             show_output(output, error)
-            user_output_question = st.text_input(
-                f"Your question about the output for Command #{idx+1}:",
-                key=f"user_output_question_{idx}_{i}"
+            question_count = len(qas_all)
+            user_all_question = st.text_input(
+                f"Your question about Command/Output/Error for Command #{idx+1}:",
+                key=f"user_all_question_{idx}_{i}_{question_count}"
             )
-            if user_output_question.strip() and st.button(f"Submit Output Question #{idx+1}", key=f"submit_output_question_{idx}_{i}"):
+            if user_all_question.strip() and st.button(f"Submit Q #{idx+1}", key=f"submit_all_question_{idx}_{i}_{question_count}"):
+                MAX_CONTEXT_CHARS = 1500
+                MAX_OUTPUT_CHARS = 1000
+                MAX_ERROR_CHARS = 1000
+
                 context = build_command_context(st.session_state.command_history, idx)
-                ask_output_prompt = (
+                context = context[-MAX_CONTEXT_CHARS:]  # keep last N chars
+
+                output = (output or "")[-MAX_OUTPUT_CHARS:]
+                error = (error or "")[-MAX_ERROR_CHARS:]
+
+                ask_all_prompt = (
                     f"{context}\n"
                     f"PowerShell output: {output}\n"
                     f"PowerShell error: {error}\n"
-                    f"Question about the output: {user_output_question}\n"
+                    f"Question: {user_all_question}\n"
                     "Please answer clearly and concisely."
                 )
-                ask_output_response = llm(ask_output_prompt, max_tokens=256, temperature=0.2)
-                answer = ask_output_response["choices"][0]["text"].strip()
+                ask_all_response = llm(ask_all_prompt, max_tokens=256, temperature=0.2)
+                answer = ask_all_response["choices"][0]["text"].strip()
                 st.markdown(f"**LLM Answer:** {answer}")
                 st.session_state.command_history.append({
-                    "request": f"[Q-Output] {entry['request']}",
+                    "request": f"[Q-ALL] {entry['request']}",
                     "command": entry["command"],
-                    "question": user_output_question,
+                    "question": user_all_question,
                     "answer": answer,
                     "output": output,
                     "error": error
                 })
-                st.session_state[f"show_ask_output_{idx}_{i}"] = True
+                st.session_state[f"show_ask_all_{idx}_{i}"] = True
