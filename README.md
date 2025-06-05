@@ -52,3 +52,11 @@ Contributions are welcome! Please submit a pull request or open an issue for any
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details."# ai-command-app" 
+
+Requirements:
+
+For Cuda Support - https://developer.nvidia.com/cuda-12-1-0-download-archive
+
+Windows: Visual Studio or MinGW - https://visualstudio.microsoft.com/downloads/
+
+4b gemma can be found here - https://huggingface.co/mlabonne/gemma-3-4b-it-qat-abliterated-GGUF
